@@ -1,6 +1,7 @@
-use crate::protocol::DataType;
+use crate::{protocol::DataType, Map};
 
 use anyhow::{bail, Result};
+use bytes::Bytes;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -26,6 +27,8 @@ pub enum Commands {
     PING,
     COMMAND,
     ECHO { message: String },
+    SET { key: String, value: Bytes },
+    GET { key: String },
 }
 
 impl Commands {
@@ -48,6 +51,33 @@ impl Commands {
                             message: message.clone(),
                         });
                     }
+                    "SET" => {
+                        let key = match array.get(1) {
+                            Some(
+                                DataType::SimpleString { string } | DataType::BulkString { string },
+                            ) => string,
+                            _ => bail!(ParseError::BadArguments),
+                        };
+                        let value = match array.get(2) {
+                            Some(
+                                DataType::SimpleString { string } | DataType::BulkString { string },
+                            ) => string,
+                            _ => bail!(ParseError::BadArguments),
+                        };
+                        return Ok(Commands::SET {
+                            key: key.clone(),
+                            value: Bytes::from(value.clone()),
+                        });
+                    }
+                    "GET" => {
+                        let key = match array.get(1) {
+                            Some(
+                                DataType::SimpleString { string } | DataType::BulkString { string },
+                            ) => string,
+                            _ => bail!(ParseError::BadArguments),
+                        };
+                        return Ok(Commands::GET { key: key.clone() });
+                    }
                     _ => bail!(ParseError::UnkownCommand(string.clone())),
                 }
             }
@@ -55,7 +85,7 @@ impl Commands {
         };
     }
 
-    pub fn execute(&self) -> Result<DataType> {
+    pub fn execute(&self, map: Map) -> Result<DataType> {
         let response = match self {
             Commands::PING => DataType::SimpleString {
                 string: "PONG".to_string(),
@@ -66,6 +96,28 @@ impl Commands {
             Commands::ECHO { message } => DataType::BulkString {
                 string: message.clone(),
             },
+            Commands::SET { key, value } => {
+                let mut map = map.lock().unwrap();
+                let mut resp = DataType::SimpleString {
+                    string: String::from("OK"),
+                };
+                if let Some(v) = map.get(key) {
+                    resp = DataType::BulkString {
+                        string: String::from_utf8(v.to_vec())?,
+                    };
+                }
+                map.insert(key.clone(), value.clone());
+                resp
+            }
+            Commands::GET { key } => {
+                let map = map.lock().unwrap();
+                match map.get(key) {
+                    Some(v) => DataType::BulkString {
+                        string: String::from_utf8(v.to_vec())?,
+                    },
+                    None => DataType::NullBulkString {},
+                }
+            }
         };
         return Ok(response);
     }
