@@ -1,17 +1,23 @@
-use std::net::TcpListener;
+use std::{io::Write, net::TcpListener};
 
+use crate::commands::parse_command;
+
+mod commands;
 mod protocol;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
+            Ok(mut stream) => {
                 println!("accepted new connection");
-                let mut p = protocol::Parser::new(stream);
+                let mut p = protocol::Decoder::new(&mut stream);
                 let ops = p.parse().unwrap();
                 for op in ops {
-                    println!("received: {:?}", op);
+                    let cmd = parse_command(op).unwrap();
+                    println!("received command: {:?}", cmd);
+                    let response = cmd.get_response().unwrap();
+                    stream.write(response.encode().unwrap().as_slice()).unwrap();
                 }
                 println!("Done");
             }

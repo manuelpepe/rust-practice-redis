@@ -239,31 +239,44 @@ impl DataType {
         let typechar = bytes.get_u8_safe()? as char;
         match typechar {
             '+' => {
-                let string = parse_simple_string(bytes)?;
+                let string = decode_simple_string(bytes)?;
                 return Ok(DataType::SimpleString { string });
             }
             '-' => {
-                let (type_, error) = parse_error(bytes)?;
+                let (type_, error) = decode_error(bytes)?;
                 return Ok(DataType::Error { type_, error });
             }
             ':' => {
-                let number = parse_integer(bytes)?;
+                let number = decode_integer(bytes)?;
                 return Ok(DataType::Integer { number });
             }
             '$' => {
-                return match parse_bulk_string(bytes)? {
+                return match decode_bulk_string(bytes)? {
                     Some(string) => Ok(DataType::BulkString { string }),
                     None => Ok(DataType::NullBulkString),
                 };
             }
             '*' => {
-                let items = parse_array(bytes)?;
+                let items = decode_array(bytes)?;
                 return Ok(DataType::Array { items });
             }
             '\0' => bail!(ScanError::StreamEnded),
             _ => bail!(ScanError::UnkownDataType(typechar)),
         };
     }
+
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        match self {
+            DataType::SimpleString { string } => encode_string(string),
+            _ => bail!("not implemented"),
+        }
+    }
+}
+
+fn encode_string(string: &String) -> Result<Vec<u8>> {
+    // TODO: Check string does not contain '\r\n'
+    let formatted = format!("+{string}\r\n");
+    return Ok(formatted.as_bytes().to_vec());
 }
 
 /// Reads from Bytes until '\r\n' is found.
@@ -300,24 +313,24 @@ fn read_until_rn_integer(bytes: &mut Bytes) -> Result<isize> {
     return Ok(read_until_rn_string(bytes)?.parse::<isize>()?);
 }
 
-/// Parser for DataType::SimpleString
-fn parse_simple_string(bytes: &mut Bytes) -> Result<String> {
+/// Decoder for DataType::SimpleString
+fn decode_simple_string(bytes: &mut Bytes) -> Result<String> {
     return read_until_rn_string(bytes);
 }
 
-/// Parser for DataType::Error
-fn parse_error(bytes: &mut Bytes) -> Result<(String, String)> {
+/// Decoder for DataType::Error
+fn decode_error(bytes: &mut Bytes) -> Result<(String, String)> {
     // TODO: pending error types implementation
-    return Ok((String::new(), parse_simple_string(bytes)?));
+    return Ok((String::new(), decode_simple_string(bytes)?));
 }
 
-/// Parser for DataType::Integer
-fn parse_integer(bytes: &mut Bytes) -> Result<isize> {
+/// Decoder for DataType::Integer
+fn decode_integer(bytes: &mut Bytes) -> Result<isize> {
     return read_until_rn_integer(bytes);
 }
 
-/// Parser for DataType::BulkString and DataType::NullBulkString
-fn parse_bulk_string(bytes: &mut Bytes) -> Result<Option<String>> {
+/// Decoder for DataType::BulkString and DataType::NullBulkString
+fn decode_bulk_string(bytes: &mut Bytes) -> Result<Option<String>> {
     let size = read_until_rn_integer(bytes)?;
     if size == -1 {
         if bytes.get_u8_safe()? != b'\r' || bytes.get_u8_safe()? != b'\n' {
@@ -339,8 +352,8 @@ fn parse_bulk_string(bytes: &mut Bytes) -> Result<Option<String>> {
     return Ok(Some(String::from_utf8(data_buf)?));
 }
 
-/// Parser for DataType::Array
-fn parse_array(bytes: &mut Bytes) -> Result<Vec<DataType>> {
+/// Decoder for DataType::Array
+fn decode_array(bytes: &mut Bytes) -> Result<Vec<DataType>> {
     let size = read_until_rn_integer(bytes)?;
     let mut items = Vec::with_capacity(size as usize);
     for _ in 0..size {
@@ -350,24 +363,22 @@ fn parse_array(bytes: &mut Bytes) -> Result<Vec<DataType>> {
     return Ok(items);
 }
 
-/// Parse RESP data from a stream
-pub struct Parser<R> {
+/// Decode RESP data from a stream
+pub struct Decoder<R> {
     stream: BufReader<R>,
 }
 
-impl<R: Read> Parser<R> {
+impl<R: Read> Decoder<R> {
     pub fn new(stream: R) -> Self {
-        return Parser {
+        return Decoder {
             stream: BufReader::new(stream),
         };
     }
 
     pub fn parse(&mut self) -> Result<Vec<DataType>> {
-        // let mut buf = Vec::new();
-        // self.stream.read_until('\0' as u8, &mut buf)?;
+        // TODO: find out how to best read the stream
         let mut buf = [0u8; 1024];
         self.stream.read(&mut buf)?;
-        // TODO: find out how to best read the stream
 
         let mut parsed = Vec::new();
         let mut bytes = Bytes::from(buf.to_vec());
@@ -435,7 +446,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_simple_string() {
+    fn test_decode_simple_string() {
         let expected = String::from("some string");
         let mut data = Bytes::from(format!("+{expected}\r\n"));
         let parsed = DataType::from(&mut data).unwrap();
@@ -443,7 +454,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_error() {
+    fn test_decode_error() {
         let expected = String::from("some error");
         let mut data = Bytes::from(format!("-{expected}\r\n"));
         let parsed = DataType::from(&mut data).unwrap();
@@ -457,7 +468,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_integer() {
+    fn test_decode_integer() {
         let tests = &[204123, 0, -1, -2300123, -0];
         for expected in tests {
             let mut data = Bytes::from(format!(":{expected}\r\n"));
@@ -467,7 +478,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_bulk_string() {
+    fn test_decode_bulk_string() {
         let tests = &["", "hello", "hello\r\nhello", "hello\nhello"];
         for test in tests {
             let expected = String::from(*test);
@@ -483,14 +494,14 @@ mod test {
     }
 
     #[test]
-    fn test_parse_null_bulk_string() {
+    fn test_decode_null_bulk_string() {
         let mut data = Bytes::from("$-1\r\n\r\n");
         let parsed = DataType::from(&mut data).unwrap();
         assert_eq!(parsed, DataType::NullBulkString);
     }
 
     #[test]
-    fn test_parse_array() {
+    fn test_decode_array() {
         let mut data = Bytes::from(
             "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*3\r\n+Hello\r\n-World\r\n$11\r\nHello\nWorld\r\n",
         );
@@ -524,4 +535,7 @@ mod test {
             }
         );
     }
+
+    #[test]
+    fn test() {}
 }
