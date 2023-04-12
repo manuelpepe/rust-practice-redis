@@ -271,15 +271,21 @@ impl DataType {
 
     pub fn encode(&self) -> Result<Vec<u8>> {
         match self {
-            DataType::SimpleString { string } => encode_string(string),
+            DataType::SimpleString { string } => encode_simple_string(string),
+            DataType::BulkString { string } => encode_bulk_string(string),
             _ => bail!("not implemented"),
         }
     }
 }
 
-fn encode_string(string: &String) -> Result<Vec<u8>> {
+fn encode_simple_string(string: &String) -> Result<Vec<u8>> {
     // TODO: Check string does not contain '\r\n'
     let formatted = format!("+{string}\r\n");
+    return Ok(formatted.as_bytes().to_vec());
+}
+
+fn encode_bulk_string(string: &String) -> Result<Vec<u8>> {
+    let formatted = format!("${}\r\n{}\r\n", string.len(), string);
     return Ok(formatted.as_bytes().to_vec());
 }
 

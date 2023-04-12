@@ -16,22 +16,38 @@ pub enum ParseError {
 
     #[error("invalid command datatype. datatype should be array.")]
     InvalidCommandDataType,
+
+    #[error("invalid format for command arguments.")]
+    BadArguments,
 }
 
 #[derive(Debug)]
 pub enum Commands {
     PING,
     COMMAND,
+    ECHO { message: String },
 }
 
 impl Commands {
     pub fn from_vec(array: Vec<DataType>) -> Result<Self> {
         let cmd = array.get(0).ok_or(ParseError::EmptyArray)?;
+
         return match cmd {
             DataType::BulkString { string } | DataType::SimpleString { string } => {
-                match string.as_str() {
-                    "ping" => Ok(Commands::PING),
+                match string.to_uppercase().as_str() {
+                    "PING" => Ok(Commands::PING),
                     "COMMAND" => Ok(Commands::COMMAND),
+                    "ECHO" => {
+                        let message = match array.get(1) {
+                            Some(
+                                DataType::SimpleString { string } | DataType::BulkString { string },
+                            ) => string,
+                            _ => bail!(ParseError::BadArguments),
+                        };
+                        return Ok(Commands::ECHO {
+                            message: message.clone(),
+                        });
+                    }
                     _ => bail!(ParseError::UnkownCommand(string.clone())),
                 }
             }
@@ -39,13 +55,16 @@ impl Commands {
         };
     }
 
-    pub fn get_response(&self) -> Result<DataType> {
+    pub fn execute(&self) -> Result<DataType> {
         let response = match self {
             Commands::PING => DataType::SimpleString {
                 string: "PONG".to_string(),
             },
             Commands::COMMAND => DataType::SimpleString {
                 string: "".to_string(),
+            },
+            Commands::ECHO { message } => DataType::BulkString {
+                string: message.clone(),
             },
         };
         return Ok(response);
