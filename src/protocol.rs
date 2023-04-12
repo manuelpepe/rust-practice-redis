@@ -1,8 +1,9 @@
-use std::io::{BufReader, Read};
+use std::io::Read;
 
 use anyhow::{bail, Result};
 use bytes::{Buf, Bytes};
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 
 trait SafeRead {
     fn get_u8_safe(&mut self) -> Result<u8>;
@@ -24,6 +25,9 @@ pub enum ScanError {
 
     #[error("unkown datatype {0}")]
     UnkownDataType(char),
+
+    #[error("closed stream")]
+    StreamClosed,
 }
 
 /// DataType represents the available data types on [RESP](https://redis.io/docs/reference/protocol-spec/#resp-protocol-description)
@@ -364,21 +368,22 @@ fn decode_array(bytes: &mut Bytes) -> Result<Vec<DataType>> {
 }
 
 /// Decode RESP data from a stream
-pub struct Decoder<R> {
-    stream: BufReader<R>,
+pub struct Decoder<'a, R> {
+    stream: &'a mut R,
 }
 
-impl<R: Read> Decoder<R> {
-    pub fn new(stream: R) -> Self {
-        return Decoder {
-            stream: BufReader::new(stream),
-        };
+impl<'a, R: AsyncReadExt + std::marker::Unpin> Decoder<'a, R> {
+    pub fn new(stream: &'a mut R) -> Self {
+        return Decoder { stream: stream };
     }
 
-    pub fn parse(&mut self) -> Result<Vec<DataType>> {
+    pub async fn parse(&mut self) -> Result<Vec<DataType>> {
         // TODO: find out how to best read the stream
         let mut buf = [0u8; 1024];
-        self.stream.read(&mut buf)?;
+        match self.stream.read(&mut buf).await {
+            Ok(0) => bail!(ScanError::StreamClosed),
+            _ => {}
+        };
 
         let mut parsed = Vec::new();
         let mut bytes = Bytes::from(buf.to_vec());
