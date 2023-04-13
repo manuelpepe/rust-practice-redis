@@ -271,11 +271,19 @@ impl DataType {
 
     pub fn encode(&self) -> Result<Vec<u8>> {
         match self {
+            DataType::Integer { number } => encode_integer(*number),
             DataType::SimpleString { string } => encode_simple_string(string),
             DataType::BulkString { string } => encode_bulk_string(string),
-            _ => bail!("not implemented"),
+            DataType::NullBulkString => encode_null_string(),
+            DataType::Error { type_, error } => encode_error(type_, error),
+            DataType::Array { items } => encode_array(items),
         }
     }
+}
+
+fn encode_integer(number: isize) -> Result<Vec<u8>> {
+    let formatted = format!(":{number}\r\n");
+    return Ok(formatted.as_bytes().to_vec());
 }
 
 fn encode_simple_string(string: &String) -> Result<Vec<u8>> {
@@ -287,6 +295,28 @@ fn encode_simple_string(string: &String) -> Result<Vec<u8>> {
 fn encode_bulk_string(string: &String) -> Result<Vec<u8>> {
     let formatted = format!("${}\r\n{}\r\n", string.len(), string);
     return Ok(formatted.as_bytes().to_vec());
+}
+
+fn encode_null_string() -> Result<Vec<u8>> {
+    return Ok("$-1\r\n".as_bytes().to_vec());
+}
+
+fn encode_error(type_: &String, string: &String) -> Result<Vec<u8>> {
+    let mut ftype = type_.clone();
+    if !type_.eq("") {
+        ftype = format!("{type_} ")
+    }
+    let formatted = format!("-{ftype}{string}\r\n");
+    return Ok(formatted.as_bytes().to_vec());
+}
+
+fn encode_array(items: &Vec<DataType>) -> Result<Vec<u8>> {
+    let mut buf = format!("*{}\r\n", items.len()).as_bytes().to_vec();
+    for item in items {
+        let mut item_data = DataType::encode(&item)?;
+        buf.append(&mut item_data);
+    }
+    return Ok(buf);
 }
 
 /// Reads from Bytes until '\r\n' is found.
@@ -343,9 +373,6 @@ fn decode_integer(bytes: &mut Bytes) -> Result<isize> {
 fn decode_bulk_string(bytes: &mut Bytes) -> Result<Option<String>> {
     let size = read_until_rn_integer(bytes)?;
     if size == -1 {
-        if bytes.get_u8_safe()? != b'\r' || bytes.get_u8_safe()? != b'\n' {
-            bail!("invalid null string format");
-        }
         return Ok(None);
     }
     if size < -1 {
@@ -459,15 +486,23 @@ mod test {
     #[test]
     fn test_decode_simple_string() {
         let expected = String::from("some string");
-        let mut data = Bytes::from(format!("+{expected}\r\n"));
+        let orig = format!("+{expected}\r\n");
+        let mut data = Bytes::from(orig.clone());
         let parsed = DataType::from(&mut data).unwrap();
         assert_eq!(parsed, DataType::SimpleString { string: expected });
+        let encoded = DataType::encode(&parsed).unwrap();
+        assert_eq!(
+            String::from_utf8(encoded).unwrap(),
+            String::from(orig),
+            "string encoded data differs from original data"
+        );
     }
 
     #[test]
     fn test_decode_error() {
         let expected = String::from("some error");
-        let mut data = Bytes::from(format!("-{expected}\r\n"));
+        let orig = format!("-{expected}\r\n");
+        let mut data = Bytes::from(orig.clone());
         let parsed = DataType::from(&mut data).unwrap();
         assert_eq!(
             parsed,
@@ -476,15 +511,28 @@ mod test {
                 error: expected
             }
         );
+        let encoded = DataType::encode(&parsed).unwrap();
+        assert_eq!(
+            String::from_utf8(encoded).unwrap(),
+            String::from(orig),
+            "string encoded data differs from original data"
+        );
     }
 
     #[test]
     fn test_decode_integer() {
         let tests = &[204123, 0, -1, -2300123, -0];
         for expected in tests {
-            let mut data = Bytes::from(format!(":{expected}\r\n"));
+            let orig = format!(":{expected}\r\n");
+            let mut data = Bytes::from(orig.clone());
             let parsed = DataType::from(&mut data).unwrap();
             assert_eq!(parsed, DataType::Integer { number: *expected });
+            let encoded = DataType::encode(&parsed).unwrap();
+            assert_eq!(
+                String::from_utf8(encoded).unwrap(),
+                String::from(orig),
+                "string encoded data differs from original data"
+            );
         }
     }
 
@@ -493,7 +541,8 @@ mod test {
         let tests = &["", "hello", "hello\r\nhello", "hello\nhello"];
         for test in tests {
             let expected = String::from(*test);
-            let mut data = Bytes::from(format!("${}\r\n{}\r\n", expected.len(), expected));
+            let orig = format!("${}\r\n{}\r\n", expected.len(), expected);
+            let mut data = Bytes::from(orig.clone());
             let parsed = DataType::from(&mut data).unwrap();
             assert_eq!(
                 parsed,
@@ -501,21 +550,34 @@ mod test {
                     string: String::from(*test)
                 }
             );
+            let encoded = DataType::encode(&parsed).unwrap();
+            assert_eq!(
+                String::from_utf8(encoded).unwrap(),
+                String::from(orig),
+                "string encoded data differs from original data"
+            );
         }
     }
 
     #[test]
     fn test_decode_null_bulk_string() {
-        let mut data = Bytes::from("$-1\r\n\r\n");
+        let orig = "$-1\r\n";
+        let mut data = Bytes::from(orig);
         let parsed = DataType::from(&mut data).unwrap();
         assert_eq!(parsed, DataType::NullBulkString);
+        let encoded = DataType::encode(&parsed).unwrap();
+        assert_eq!(
+            String::from_utf8(encoded).unwrap(),
+            String::from(orig),
+            "string encoded data differs from original data"
+        );
     }
 
     #[test]
-    fn test_decode_array() {
-        let mut data = Bytes::from(
-            "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*3\r\n+Hello\r\n-World\r\n$11\r\nHello\nWorld\r\n",
-        );
+    fn test_array() {
+        let orig =
+            "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*3\r\n+Hello\r\n-World\r\n$11\r\nHello\nWorld\r\n";
+        let mut data = Bytes::from(orig);
         let parsed = DataType::from(&mut data).unwrap();
         assert_eq!(
             parsed,
@@ -544,6 +606,13 @@ mod test {
                     },
                 ]
             }
+        );
+
+        let encoded = DataType::encode(&parsed).unwrap();
+        assert_eq!(
+            String::from_utf8(encoded).unwrap(),
+            String::from(orig),
+            "array encoded data differs from original data"
         );
     }
 
