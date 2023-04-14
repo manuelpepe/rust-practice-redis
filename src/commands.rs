@@ -1,8 +1,32 @@
-use crate::{protocol::DataType, Map};
+use crate::{
+    db::{DBValue, Map},
+    protocol::DataType,
+};
 
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use thiserror::Error;
+
+macro_rules! get_type_or_bad_arguments {
+    ($array:ident, $ix:literal, $goodmatch:pat => $val:ident) => {
+        match $array.get($ix) {
+            $goodmatch => $val,
+            _ => bail!(ParseError::BadArguments),
+        }
+    };
+}
+
+macro_rules! get_string_or_bad_args {
+    ($array:ident, $ix:literal) => {
+        get_type_or_bad_arguments!{$array, $ix, Some(DataType::SimpleString { string } | DataType::BulkString { string }) => string}
+    };
+}
+
+// macro_rules! get_isize_or_bad_args {
+//     ($array:ident, $ix:literal) => {
+//         get_type_or_bad_arguments!($array, $ix, Some(DataType::Integer { number }) => number)
+//     };
+// }
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -20,15 +44,26 @@ pub enum ParseError {
 
     #[error("invalid format for command arguments.")]
     BadArguments,
+
+    #[error("Option '{0}' for {1} not supported")]
+    UnsupportedOption(String, String),
 }
 
 #[derive(Debug)]
 pub enum Commands {
     PING,
     COMMAND,
-    ECHO { message: String },
-    SET { key: String, value: Bytes },
-    GET { key: String },
+    ECHO {
+        message: String,
+    },
+    SET {
+        key: String,
+        value: Bytes,
+        expiry: usize,
+    },
+    GET {
+        key: String,
+    },
 }
 
 impl Commands {
@@ -41,41 +76,34 @@ impl Commands {
                     "PING" => Ok(Commands::PING),
                     "COMMAND" => Ok(Commands::COMMAND),
                     "ECHO" => {
-                        let message = match array.get(1) {
-                            Some(
-                                DataType::SimpleString { string } | DataType::BulkString { string },
-                            ) => string,
-                            _ => bail!(ParseError::BadArguments),
-                        };
+                        let message = get_string_or_bad_args!(array, 1);
                         return Ok(Commands::ECHO {
                             message: message.clone(),
                         });
                     }
                     "SET" => {
-                        let key = match array.get(1) {
-                            Some(
-                                DataType::SimpleString { string } | DataType::BulkString { string },
-                            ) => string,
-                            _ => bail!(ParseError::BadArguments),
-                        };
-                        let value = match array.get(2) {
-                            Some(
-                                DataType::SimpleString { string } | DataType::BulkString { string },
-                            ) => string,
-                            _ => bail!(ParseError::BadArguments),
-                        };
+                        let key = get_string_or_bad_args!(array, 1);
+                        let value = get_string_or_bad_args!(array, 2);
+                        let opt: &String;
+                        let mut msdelay: isize = 0;
+                        if array.len() > 4 {
+                            opt = get_string_or_bad_args!(array, 3);
+                            if !opt.to_uppercase().eq("PX") {
+                                bail!(ParseError::UnsupportedOption(
+                                    opt.clone(),
+                                    "SET".to_string()
+                                ))
+                            }
+                            msdelay = get_string_or_bad_args!(array, 4).parse()?;
+                        }
                         return Ok(Commands::SET {
                             key: key.clone(),
                             value: Bytes::from(value.clone()),
+                            expiry: msdelay as usize,
                         });
                     }
                     "GET" => {
-                        let key = match array.get(1) {
-                            Some(
-                                DataType::SimpleString { string } | DataType::BulkString { string },
-                            ) => string,
-                            _ => bail!(ParseError::BadArguments),
-                        };
+                        let key = get_string_or_bad_args!(array, 1);
                         return Ok(Commands::GET { key: key.clone() });
                     }
                     _ => bail!(ParseError::UnkownCommand(string.clone())),
@@ -96,26 +124,27 @@ impl Commands {
             Commands::ECHO { message } => DataType::BulkString {
                 string: message.clone(),
             },
-            Commands::SET { key, value } => {
+            Commands::SET { key, value, expiry } => {
                 let mut map = map.lock().unwrap();
-                let mut resp = DataType::SimpleString {
-                    string: String::from("OK"),
+                let new_value = DBValue::with_expiration(value.clone(), *expiry);
+                let old_value = map.insert(key.clone(), new_value);
+                let resp = match old_value {
+                    Some(v) if !v.is_expired() => DataType::BulkString {
+                        string: String::from_utf8(v.value.to_vec())?,
+                    },
+                    _ => DataType::SimpleString {
+                        string: String::from("OK"),
+                    },
                 };
-                if let Some(v) = map.get(key) {
-                    resp = DataType::BulkString {
-                        string: String::from_utf8(v.to_vec())?,
-                    };
-                }
-                map.insert(key.clone(), value.clone());
                 resp
             }
             Commands::GET { key } => {
                 let map = map.lock().unwrap();
                 match map.get(key) {
-                    Some(v) => DataType::BulkString {
-                        string: String::from_utf8(v.to_vec())?,
+                    Some(v) if !v.is_expired() => DataType::BulkString {
+                        string: String::from_utf8(v.value.to_vec())?,
                     },
-                    None => DataType::NullBulkString {},
+                    _ => DataType::NullBulkString {},
                 }
             }
         };

@@ -1,15 +1,15 @@
 use crate::commands::parse_command;
+use crate::db::Map;
+
 use anyhow::{bail, Result};
-use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 mod commands;
+mod db;
 mod protocol;
-
-type Map = Arc<Mutex<HashMap<String, Bytes>>>;
 
 #[tokio::main]
 async fn main() {
