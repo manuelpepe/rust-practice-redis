@@ -1,35 +1,20 @@
-[![progress-banner](https://app.codecrafters.io/progress/redis/6bd382a6-1129-4c83-ad1c-ebabd46e9e7e)](https://app.codecrafters.io/users/manuelpepe)
+# Redis in Rust
 
-This is a starting point for Rust solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+A minimal Redis server written in Rust.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+Made for practice following the [CodeCrafters Redis track](https://app.codecrafters.io/courses/redis?track=rust).
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
 
-# Passing the first stage
+## Implemented Features
 
-The entry point for your Redis implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+* Adheres to the [RESP Specification](https://redis.io/docs/reference/protocol-spec/)
+* Handles clients concurrently
+* Commands: 
+   * `PING` 
+   * `ECHO <message>`
+   * `SET <key> <value> [PX <expiry>]`
+   * `GET <key>`
 
-```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
-```
+## Usage:
 
-That's all!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.54)` installed locally
-1. Run `./spawn_redis_server.sh` to run your Redis server, which is implemented
-   in `src/main.rs`. This command compiles your Rust project, so it might be
-   slow the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+Start the server with `cargo run`, connect to the server using `redis-cli`.

@@ -22,12 +22,6 @@ macro_rules! get_string_or_bad_args {
     };
 }
 
-// macro_rules! get_isize_or_bad_args {
-//     ($array:ident, $ix:literal) => {
-//         get_type_or_bad_arguments!($array, $ix, Some(DataType::Integer { number }) => number)
-//     };
-// }
-
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("empty array")]
@@ -51,19 +45,28 @@ pub enum ParseError {
 
 #[derive(Debug)]
 pub enum Commands {
+    /// PING responds with PONG
     PING,
+
+    /// COMMAND responds with an Array of available server features.
     COMMAND,
-    ECHO {
-        message: String,
-    },
+
+    /// ECHO responds with the received message as a BulkString.
+    ECHO { message: String },
+
+    /// SET stores 'value' under 'key' in the in-memory database.
+    /// The value can have a optional 'expiry' (PX option).
+    /// If the key is already set, responds with old value as a BulkString.
+    /// Otherwise responds "OK" as a SimpleString.
     SET {
         key: String,
         value: Bytes,
         expiry: usize,
     },
-    GET {
-        key: String,
-    },
+
+    /// GET returns the value of 'key' in the in-memory database as a BulkString .
+    /// If the key is not set or expired, responds with a NullBulkString.
+    GET { key: String },
 }
 
 impl Commands {

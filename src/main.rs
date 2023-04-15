@@ -13,7 +13,9 @@ mod protocol;
 
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let bind_address = "127.0.0.1:6379";
+    let listener = TcpListener::bind(&bind_address).await.unwrap();
+    println!("server started at {}", bind_address);
     let map: Map = Arc::new(Mutex::new(HashMap::new()));
     loop {
         let (stream, _) = listener.accept().await.unwrap();
