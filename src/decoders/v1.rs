@@ -318,7 +318,7 @@ mod test {
     }
 
     #[test]
-    fn test_array() {
+    fn test_decode_array() {
         let orig =
             "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*3\r\n+Hello\r\n-World\r\n$11\r\nHello\nWorld\r\n";
         let mut data = Bytes::from(orig);
